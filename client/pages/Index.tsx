@@ -1,5 +1,8 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { signOut } from "firebase/auth";
+import { addDoc, collection, deleteDoc, doc, limit, onSnapshot, orderBy, query, serverTimestamp, setDoc, updateDoc } from "firebase/firestore";
 import type { LucideIcon } from "lucide-react";
+import { auth, db } from "@/lib/firebase";
 import {
   AlertTriangle,
   ArrowUpRight,
@@ -19,6 +22,7 @@ import {
   FilePlus2,
   HandCoins,
   History,
+  Loader2,
   LayoutDashboard,
   Menu,
   MessageSquareText,
@@ -96,6 +100,9 @@ const defaultPartners: Partner[] = [
 ];
 
 const paymentMethods = ["Душанбе Сити", "Alif", "Наличные", "Перевод на карту"];
+const numberId = (value: unknown, fallback: number) => typeof value === "number" ? value : Number(value) || fallback;
+const userCollection = (uid: string, name: string) => collection(db, "users", uid, name);
+const syncError = () => "Не удалось синхронизировать данные с Firebase";
 
 function MetricInput({ label, helper, value, onChange, icon: Icon, iconClassName }: MetricInputProps) {
   return (
@@ -237,6 +244,85 @@ export default function Index() {
   const [newPartner, setNewPartner] = useState({ name: "", descriptor: "", rate: "2" });
   const [isSaved, setIsSaved] = useState(false);
   const [notice, setNotice] = useState("");
+  const [firebaseError, setFirebaseError] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+
+  const uid = auth.currentUser?.uid;
+
+  useEffect(() => {
+    if (!uid) return;
+    const unsubscribe = onSnapshot(userCollection(uid, "couriers"), (snapshot) => {
+      if (snapshot.empty) {
+        Promise.all(defaultCouriers.map((courier) => setDoc(doc(db, "users", uid, "couriers", String(courier.id)), courier))).catch(() => setFirebaseError(syncError()));
+        return;
+      }
+      setCouriers(snapshot.docs.map((item) => {
+        const data = item.data();
+        const name = String(data.name ?? "Курьер");
+        return { id: numberId(data.id, Number(item.id) || Date.now()), name, initials: String(data.initials ?? makeInitials(name)), tone: String(data.tone ?? toneOptions[0]) };
+      }));
+    }, () => setFirebaseError(syncError()));
+    return unsubscribe;
+  }, [uid]);
+
+  useEffect(() => {
+    if (!uid) return;
+    const unsubscribe = onSnapshot(userCollection(uid, "partners"), (snapshot) => {
+      if (snapshot.empty) {
+        Promise.all(defaultPartners.map((partner) => setDoc(doc(db, "users", uid, "partners", String(partner.id)), partner))).catch(() => setFirebaseError(syncError()));
+        return;
+      }
+      setPartners(snapshot.docs.map((item) => {
+        const data = item.data();
+        return { id: numberId(data.id, Number(item.id) || Date.now()), name: String(data.name ?? "Партнёр"), rate: Number(data.rate) || 0, descriptor: String(data.descriptor ?? "партнёр"), tone: String(data.tone ?? "bg-[#e8f5ff] text-[#3882b8]") };
+      }));
+    }, () => setFirebaseError(syncError()));
+    return unsubscribe;
+  }, [uid]);
+
+  useEffect(() => {
+    if (!uid) return;
+    const unsubscribe = onSnapshot(query(userCollection(uid, "shifts"), orderBy("createdAt", "desc"), limit(1)), (snapshot) => {
+      const item = snapshot.docs[0];
+      if (!item) return;
+      const data = item.data();
+      const savedRows = Array.isArray(data.partnerRows) ? data.partnerRows.map((row) => ({ id: numberId(row.id, Date.now()), partnerId: numberId(row.partnerId, defaultPartners[0].id), amount: String(row.amount ?? "") })) : [];
+      if (data.courierId) setSelectedCourierId(numberId(data.courierId, defaultCouriers[0].id));
+      if (data.date) setDateValue(String(data.date));
+      if (data.systemOrders !== undefined) setSystemOrders(String(data.systemOrders));
+      if (data.systemAmount !== undefined) setSystemAmount(String(data.systemAmount));
+      if (data.offlineOrders !== undefined) setOfflineOrders(String(data.offlineOrders));
+      if (data.offlineAmount !== undefined) setOfflineAmount(String(data.offlineAmount));
+      if (data.deliveryAmount !== undefined) setDeliveryAmount(String(data.deliveryAmount));
+      if (data.batteryCount !== undefined) setBatteryCount(String(data.batteryCount));
+      if (data.finesAmount !== undefined) setFinesAmount(String(data.finesAmount));
+      if (data.comment !== undefined) setComment(String(data.comment));
+      if (savedRows.length > 0) setPartnerRows(savedRows);
+    }, () => setFirebaseError(syncError()));
+    return unsubscribe;
+  }, [uid]);
+
+  useEffect(() => {
+    if (!uid) return;
+    const unsubscribe = onSnapshot(userCollection(uid, "expenses"), (snapshot) => {
+      setExpenses(snapshot.docs.map((item) => {
+        const data = item.data();
+        return { id: numberId(data.id, Number(item.id) || Date.now()), date: String(data.date ?? today), amount: String(data.amount ?? ""), recipient: String(data.recipient ?? ""), comment: String(data.comment ?? "") };
+      }));
+    }, () => setFirebaseError(syncError()));
+    return unsubscribe;
+  }, [uid]);
+
+  useEffect(() => {
+    if (!uid) return;
+    const unsubscribe = onSnapshot(userCollection(uid, "partnerPayments"), (snapshot) => {
+      setPartnerPayments(snapshot.docs.map((item) => {
+        const data = item.data();
+        return { id: numberId(data.id, Number(item.id) || Date.now()), partnerId: numberId(data.partnerId, defaultPartners[0].id), date: String(data.date ?? today), amount: String(data.amount ?? ""), method: String(data.method ?? paymentMethods[0]), comment: String(data.comment ?? "") };
+      }));
+    }, () => setFirebaseError(syncError()));
+    return unsubscribe;
+  }, [uid]);
 
   const selectedCourier = couriers.find((courier) => courier.id === selectedCourierId) ?? couriers[0];
   const filteredCouriers = useMemo(() => {
@@ -303,25 +389,68 @@ export default function Index() {
 
   const removePartnerRow = (id: number) => setPartnerRows((current) => current.filter((row) => row.id !== id));
 
-  const handleSave = () => {
-    setIsSaved(true);
-    setNotice("Отчёт смены сохранён в рабочем журнале");
-    window.setTimeout(() => setIsSaved(false), 3200);
+  const handleSave = async () => {
+    if (!uid || !selectedCourier) return;
+    setIsSaving(true);
+    setFirebaseError("");
+    try {
+      await addDoc(userCollection(uid, "shifts"), {
+        courierId: selectedCourier.id,
+        courierName: selectedCourier.name,
+        date: dateValue,
+        systemOrders: Number(systemOrders) || 0,
+        systemAmount: systemTotal,
+        offlineOrders: Number(offlineOrders) || 0,
+        offlineAmount: offlineTotal,
+        deliveryAmount: deliveryTotal,
+        batteryCount: Number(batteryCount) || 0,
+        batteryAmount: batteryTotal,
+        finesAmount: finesTotal,
+        partnerRows,
+        partnerGross,
+        partnerCommission,
+        companyIncome,
+        cashReceived,
+        comment,
+        createdAt: serverTimestamp(),
+      });
+      setIsSaved(true);
+      setNotice("Отчёт смены сохранён в Firestore");
+      window.setTimeout(() => setIsSaved(false), 3200);
+    } catch {
+      setFirebaseError(syncError());
+    } finally {
+      setIsSaving(false);
+    }
   };
 
-  const addExpense = () => {
+  const addExpense = async () => {
     if (!expenseDraft.recipient.trim() || parseAmount(expenseDraft.amount) <= 0) {
       setNotice("Укажите сумму расхода и адресата денег");
       return;
     }
-    setExpenses((current) => [...current, { id: Date.now(), ...expenseDraft }]);
-    setExpenseDraft({ date: dateValue, amount: "", recipient: "", comment: "" });
-    setNotice("Расход добавлен в журнал");
+    if (!uid) return;
+    setFirebaseError("");
+    try {
+      const id = Date.now();
+      await setDoc(doc(db, "users", uid, "expenses", String(id)), { id, ...expenseDraft, createdAt: serverTimestamp() });
+      setExpenseDraft({ date: dateValue, amount: "", recipient: "", comment: "" });
+      setNotice("Расход добавлен в Firestore");
+    } catch {
+      setFirebaseError(syncError());
+    }
   };
 
-  const removeExpense = (id: number) => setExpenses((current) => current.filter((expense) => expense.id !== id));
+  const removeExpense = async (id: number) => {
+    if (!uid) return;
+    try {
+      await deleteDoc(doc(db, "users", uid, "expenses", String(id)));
+    } catch {
+      setFirebaseError(syncError());
+    }
+  };
 
-  const addPayment = () => {
+  const addPayment = async () => {
     const amount = parseAmount(paymentDraft.amount);
     if (amount <= 0) {
       setNotice("Введите сумму выплаты партнёру");
@@ -335,43 +464,78 @@ export default function Index() {
       setNotice(`Выплата больше остатка долга: ${formatSomoni(currentPaymentBalance.remaining)} сомони`);
       return;
     }
-    setPartnerPayments((current) => [...current, { id: Date.now(), ...paymentDraft }]);
-    setPaymentDraft((current) => ({ ...current, amount: "", comment: "" }));
-    setNotice("Выплата добавлена в историю взаиморасчётов");
+    if (!uid) return;
+    setFirebaseError("");
+    try {
+      const id = Date.now();
+      await setDoc(doc(db, "users", uid, "partnerPayments", String(id)), { id, ...paymentDraft, amount: String(amount), createdAt: serverTimestamp() });
+      setPaymentDraft((current) => ({ ...current, amount: "", comment: "" }));
+      setNotice("Выплата добавлена в историю Firestore");
+    } catch {
+      setFirebaseError(syncError());
+    }
   };
 
-  const addCourier = () => {
+  const addCourier = async () => {
     const name = newCourierName.trim();
     if (!name) {
       setNotice("Введите имя курьера");
       return;
     }
+    if (!uid) return;
     const courier = { id: Date.now(), name, initials: makeInitials(name), tone: toneOptions[couriers.length % toneOptions.length] };
-    setCouriers((current) => [...current, courier]);
-    setNewCourierName("");
-    setNotice("Курьер добавлен в справочник");
+    setFirebaseError("");
+    try {
+      await setDoc(doc(db, "users", uid, "couriers", String(courier.id)), courier);
+      setNewCourierName("");
+      setNotice("Курьер добавлен в Firestore");
+    } catch {
+      setFirebaseError(syncError());
+    }
   };
 
-  const removeCourier = (id: number) => {
+  const removeCourier = async (id: number) => {
     if (couriers.length === 1) {
       setNotice("В справочнике должен остаться хотя бы один курьер");
       return;
     }
-    setCouriers((current) => current.filter((courier) => courier.id !== id));
-    if (selectedCourierId === id) setSelectedCourierId(couriers.find((courier) => courier.id !== id)?.id ?? couriers[0].id);
+    if (!uid) return;
+    try {
+      await deleteDoc(doc(db, "users", uid, "couriers", String(id)));
+      if (selectedCourierId === id) setSelectedCourierId(couriers.find((courier) => courier.id !== id)?.id ?? couriers[0].id);
+    } catch {
+      setFirebaseError(syncError());
+    }
   };
 
-  const addPartner = () => {
+  const updatePartnerRate = async (id: number, value: string) => {
+    const rate = parseAmount(value);
+    setPartners((current) => current.map((item) => item.id === id ? { ...item, rate } : item));
+    if (!uid) return;
+    try {
+      await updateDoc(doc(db, "users", uid, "partners", String(id)), { rate });
+    } catch {
+      setFirebaseError(syncError());
+    }
+  };
+
+  const addPartner = async () => {
     const name = newPartner.name.trim();
     const rate = parseAmount(newPartner.rate);
     if (!name || rate < 0 || rate > 100) {
       setNotice("Укажите название партнёра и процент от 0 до 100");
       return;
     }
+    if (!uid) return;
     const partner = { id: Date.now(), name, descriptor: newPartner.descriptor.trim() || "партнёр", rate, tone: "bg-[#e8f5ff] text-[#3882b8]" };
-    setPartners((current) => [...current, partner]);
-    setNewPartner({ name: "", descriptor: "", rate: "2" });
-    setNotice("Партнёр добавлен. Процент сохранён в настройках");
+    setFirebaseError("");
+    try {
+      await setDoc(doc(db, "users", uid, "partners", String(partner.id)), partner);
+      setNewPartner({ name: "", descriptor: "", rate: "2" });
+      setNotice("Партнёр добавлен в Firestore");
+    } catch {
+      setFirebaseError(syncError());
+    }
   };
 
   const renderOverview = () => (
@@ -433,7 +597,7 @@ export default function Index() {
     <>
       <PageHeader title="Настройки" eyebrow="Справочники" description="Добавляйте курьеров и партнёров только здесь. Процент комиссии хранится в карточке партнёра и автоматически используется в расчётах." dateValue={dateValue} onDateChange={setDateValue} />
       <div className="mb-6 flex max-w-md rounded-2xl border border-brand-line bg-white p-1.5 shadow-sm shadow-brand-ink/5"><button type="button" onClick={() => setSettingsSection("couriers")} className={`flex flex-1 items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-bold transition ${settingsSection === "couriers" ? "bg-brand-ink text-white" : "text-brand-muted hover:text-brand-ink"}`}><Users className="h-4 w-4" /> Курьеры</button><button type="button" onClick={() => setSettingsSection("partners")} className={`flex flex-1 items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-bold transition ${settingsSection === "partners" ? "bg-brand-ink text-white" : "text-brand-muted hover:text-brand-ink"}`}><Building2 className="h-4 w-4" /> Партнёры</button></div>
-      {settingsSection === "couriers" ? <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]"><section className="rounded-[28px] border border-brand-line bg-white p-5 shadow-[0_18px_50px_rgba(23,35,44,0.045)] sm:p-7"><SectionLabel eyebrow="Справочник курьеров" title="Добавить курьера" /><div className="space-y-4"><label className="block"><span className="mb-2 block text-xs font-bold text-brand-muted">Имя и фамилия</span><input value={newCourierName} onChange={(event) => setNewCourierName(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") addCourier(); }} placeholder="Например, Бобоев Юсуф" className="h-12 w-full rounded-xl border border-brand-line bg-brand-mist/45 px-3 text-sm font-semibold outline-none placeholder:text-brand-muted/60 focus:border-brand-teal focus:bg-white" /></label><button type="button" onClick={addCourier} className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-brand-ink text-sm font-extrabold text-white transition hover:bg-brand-teal hover:text-brand-ink"><Plus className="h-4 w-4" /> Добавить в справочник</button></div></section><section className="rounded-[28px] border border-brand-line bg-white p-5 shadow-[0_18px_50px_rgba(23,35,44,0.045)] sm:p-7"><SectionLabel eyebrow="Активные курьеры" title={`${couriers.length} в справочнике`} action={<span className="text-xs font-semibold text-brand-muted">Используются в сменах</span>} /><div className="space-y-2.5">{couriers.map((courier) => <div key={courier.id} className="flex items-center gap-3 rounded-2xl border border-brand-line bg-brand-mist/35 px-3.5 py-3"><span className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl text-xs font-bold ${courier.tone}`}>{courier.initials}</span><div className="min-w-0 flex-1"><p className="truncate text-sm font-bold">{courier.name}</p><p className="mt-0.5 text-xs font-medium text-brand-muted">Готов к сдаче смены</p></div>{selectedCourierId === courier.id && <span className="rounded-full bg-brand-teal/15 px-2 py-1 text-[10px] font-bold text-brand-teal-dark">Выбран</span>}<button type="button" onClick={() => removeCourier(courier.id)} className="grid h-8 w-8 place-items-center rounded-lg text-brand-muted transition hover:bg-brand-coral/15 hover:text-brand-coral-dark" aria-label={`Удалить ${courier.name}`}><Trash2 className="h-4 w-4" /></button></div>)}</div></section></div> : <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]"><section className="rounded-[28px] border border-brand-line bg-white p-5 shadow-[0_18px_50px_rgba(23,35,44,0.045)] sm:p-7"><SectionLabel eyebrow="Справочник партнёров" title="Добавить партнёра" /><div className="space-y-4"><label className="block"><span className="mb-2 block text-xs font-bold text-brand-muted">Название партнёра</span><input value={newPartner.name} onChange={(event) => setNewPartner((current) => ({ ...current, name: event.target.value }))} placeholder="Например, Tcell" className="h-11 w-full rounded-xl border border-brand-line bg-brand-mist/45 px-3 text-sm font-semibold outline-none placeholder:text-brand-muted/60 focus:border-brand-teal focus:bg-white" /></label><label className="block"><span className="mb-2 block text-xs font-bold text-brand-muted">Описание</span><input value={newPartner.descriptor} onChange={(event) => setNewPartner((current) => ({ ...current, descriptor: event.target.value }))} placeholder="Например, мобильная связь" className="h-11 w-full rounded-xl border border-brand-line bg-brand-mist/45 px-3 text-sm font-semibold outline-none placeholder:text-brand-muted/60 focus:border-brand-teal focus:bg-white" /></label><label className="block"><span className="mb-2 block text-xs font-bold text-brand-muted">Процент комиссии</span><span className="flex h-11 items-center gap-2 rounded-xl border border-brand-line bg-brand-mist/45 px-3 focus-within:border-brand-teal"><input type="number" min="0" max="100" step="0.1" value={newPartner.rate} onChange={(event) => setNewPartner((current) => ({ ...current, rate: event.target.value }))} className="w-full bg-transparent text-sm font-bold outline-none" /><span className="text-sm font-bold text-brand-teal-dark">%</span></span></label><button type="button" onClick={addPartner} className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-brand-ink text-sm font-extrabold text-white transition hover:bg-brand-teal hover:text-brand-ink"><Plus className="h-4 w-4" /> Добавить партнёра</button></div></section><section className="rounded-[28px] border border-brand-line bg-white p-5 shadow-[0_18px_50px_rgba(23,35,44,0.045)] sm:p-7"><SectionLabel eyebrow="Ставки и партнёры" title={`${partners.length} в справочнике`} action={<span className="text-xs font-semibold text-brand-muted">Процент задаётся здесь</span>} /><div className="space-y-2.5">{partners.map((partner) => <div key={partner.id} className="flex flex-col gap-3 rounded-2xl border border-brand-line bg-brand-mist/35 p-3 sm:flex-row sm:items-center"><span className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl text-[10px] font-bold ${partner.tone}`}>{partner.name.slice(0, 2).toUpperCase()}</span><div className="min-w-0 flex-1"><p className="truncate text-sm font-bold">{partner.name}</p><p className="mt-0.5 text-xs font-medium text-brand-muted">{partner.descriptor}</p></div><label className="flex h-10 items-center gap-1.5 rounded-xl border border-brand-line bg-white px-3"><input type="number" min="0" max="100" step="0.1" value={partner.rate} onChange={(event) => setPartners((current) => current.map((item) => item.id === partner.id ? { ...item, rate: parseAmount(event.target.value) } : item))} className="w-14 bg-transparent text-right text-sm font-bold outline-none" /><span className="text-xs font-bold text-brand-teal-dark">%</span></label><span className="text-xs font-semibold text-brand-muted sm:w-28">с каждого чека</span></div>)}</div></section></div>}
+      {settingsSection === "couriers" ? <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]"><section className="rounded-[28px] border border-brand-line bg-white p-5 shadow-[0_18px_50px_rgba(23,35,44,0.045)] sm:p-7"><SectionLabel eyebrow="Справочник курьеров" title="Добавить курьера" /><div className="space-y-4"><label className="block"><span className="mb-2 block text-xs font-bold text-brand-muted">Имя и фамилия</span><input value={newCourierName} onChange={(event) => setNewCourierName(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") addCourier(); }} placeholder="Например, Бобоев Юсуф" className="h-12 w-full rounded-xl border border-brand-line bg-brand-mist/45 px-3 text-sm font-semibold outline-none placeholder:text-brand-muted/60 focus:border-brand-teal focus:bg-white" /></label><button type="button" onClick={addCourier} className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-brand-ink text-sm font-extrabold text-white transition hover:bg-brand-teal hover:text-brand-ink"><Plus className="h-4 w-4" /> Добавить в справочник</button></div></section><section className="rounded-[28px] border border-brand-line bg-white p-5 shadow-[0_18px_50px_rgba(23,35,44,0.045)] sm:p-7"><SectionLabel eyebrow="Активные курьеры" title={`${couriers.length} в справочнике`} action={<span className="text-xs font-semibold text-brand-muted">Используются в сменах</span>} /><div className="space-y-2.5">{couriers.map((courier) => <div key={courier.id} className="flex items-center gap-3 rounded-2xl border border-brand-line bg-brand-mist/35 px-3.5 py-3"><span className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl text-xs font-bold ${courier.tone}`}>{courier.initials}</span><div className="min-w-0 flex-1"><p className="truncate text-sm font-bold">{courier.name}</p><p className="mt-0.5 text-xs font-medium text-brand-muted">Готов к сдаче смены</p></div>{selectedCourierId === courier.id && <span className="rounded-full bg-brand-teal/15 px-2 py-1 text-[10px] font-bold text-brand-teal-dark">Выбран</span>}<button type="button" onClick={() => removeCourier(courier.id)} className="grid h-8 w-8 place-items-center rounded-lg text-brand-muted transition hover:bg-brand-coral/15 hover:text-brand-coral-dark" aria-label={`Удалить ${courier.name}`}><Trash2 className="h-4 w-4" /></button></div>)}</div></section></div> : <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]"><section className="rounded-[28px] border border-brand-line bg-white p-5 shadow-[0_18px_50px_rgba(23,35,44,0.045)] sm:p-7"><SectionLabel eyebrow="Справочник партнёров" title="Добавить партнёра" /><div className="space-y-4"><label className="block"><span className="mb-2 block text-xs font-bold text-brand-muted">Название партнёра</span><input value={newPartner.name} onChange={(event) => setNewPartner((current) => ({ ...current, name: event.target.value }))} placeholder="Например, Tcell" className="h-11 w-full rounded-xl border border-brand-line bg-brand-mist/45 px-3 text-sm font-semibold outline-none placeholder:text-brand-muted/60 focus:border-brand-teal focus:bg-white" /></label><label className="block"><span className="mb-2 block text-xs font-bold text-brand-muted">Описание</span><input value={newPartner.descriptor} onChange={(event) => setNewPartner((current) => ({ ...current, descriptor: event.target.value }))} placeholder="Например, мобильная связь" className="h-11 w-full rounded-xl border border-brand-line bg-brand-mist/45 px-3 text-sm font-semibold outline-none placeholder:text-brand-muted/60 focus:border-brand-teal focus:bg-white" /></label><label className="block"><span className="mb-2 block text-xs font-bold text-brand-muted">Процент комиссии</span><span className="flex h-11 items-center gap-2 rounded-xl border border-brand-line bg-brand-mist/45 px-3 focus-within:border-brand-teal"><input type="number" min="0" max="100" step="0.1" value={newPartner.rate} onChange={(event) => setNewPartner((current) => ({ ...current, rate: event.target.value }))} className="w-full bg-transparent text-sm font-bold outline-none" /><span className="text-sm font-bold text-brand-teal-dark">%</span></span></label><button type="button" onClick={addPartner} className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-brand-ink text-sm font-extrabold text-white transition hover:bg-brand-teal hover:text-brand-ink"><Plus className="h-4 w-4" /> Добавить партнёра</button></div></section><section className="rounded-[28px] border border-brand-line bg-white p-5 shadow-[0_18px_50px_rgba(23,35,44,0.045)] sm:p-7"><SectionLabel eyebrow="Ставки и партнёры" title={`${partners.length} в справочнике`} action={<span className="text-xs font-semibold text-brand-muted">Процент задаётся здесь</span>} /><div className="space-y-2.5">{partners.map((partner) => <div key={partner.id} className="flex flex-col gap-3 rounded-2xl border border-brand-line bg-brand-mist/35 p-3 sm:flex-row sm:items-center"><span className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl text-[10px] font-bold ${partner.tone}`}>{partner.name.slice(0, 2).toUpperCase()}</span><div className="min-w-0 flex-1"><p className="truncate text-sm font-bold">{partner.name}</p><p className="mt-0.5 text-xs font-medium text-brand-muted">{partner.descriptor}</p></div><label className="flex h-10 items-center gap-1.5 rounded-xl border border-brand-line bg-white px-3"><input type="number" min="0" max="100" step="0.1" value={partner.rate} onChange={(event) => updatePartnerRate(partner.id, event.target.value)} className="w-14 bg-transparent text-right text-sm font-bold outline-none" /><span className="text-xs font-bold text-brand-teal-dark">%</span></label><span className="text-xs font-semibold text-brand-muted sm:w-28">с каждого чека</span></div>)}</div></section></div>}
     </>
   );
 
@@ -445,7 +609,7 @@ export default function Index() {
         <section className="rounded-[28px] border border-brand-line bg-white p-5 shadow-[0_18px_50px_rgba(23,35,44,0.045)] sm:p-7"><SectionLabel eyebrow="02 / деньги от курьера" title="Заказы и собственные доходы" action={<span className="text-xs font-semibold text-brand-muted">Доход компании</span>} /><div className="grid gap-4 md:grid-cols-2"><MetricInput label="Заказы по системе" helper={`${systemOrders || 0} шт.`} value={systemAmount} onChange={setSystemAmount} icon={CreditCard} iconClassName="bg-brand-teal/20 text-brand-teal-dark" /><MetricInput label="Заказы без системы" helper={`${offlineOrders || 0} шт.`} value={offlineAmount} onChange={setOfflineAmount} icon={Receipt} iconClassName="bg-brand-coral/20 text-brand-coral-dark" /></div><div className="mt-4 grid gap-4 md:grid-cols-2"><label className="block"><span className="mb-2 flex items-center justify-between text-xs font-bold text-brand-muted"><span>Количество по системе</span><span className="text-brand-teal-dark">шт.</span></span><input type="number" min="0" value={systemOrders} onChange={(event) => setSystemOrders(event.target.value)} className="h-11 w-full rounded-xl border border-brand-line bg-brand-mist/45 px-3 text-sm font-bold outline-none transition focus:border-brand-teal focus:bg-white focus:ring-2 focus:ring-brand-teal/15" /></label><label className="block"><span className="mb-2 flex items-center justify-between text-xs font-bold text-brand-muted"><span>Количество без системы</span><span className="text-brand-coral-dark">шт.</span></span><input type="number" min="0" value={offlineOrders} onChange={(event) => setOfflineOrders(event.target.value)} className="h-11 w-full rounded-xl border border-brand-line bg-brand-mist/45 px-3 text-sm font-bold outline-none transition focus:border-brand-teal focus:bg-white focus:ring-2 focus:ring-brand-teal/15" /></label></div><div className="mt-5 flex flex-col gap-3 border-t border-brand-line pt-5 sm:flex-row sm:items-center sm:justify-between"><div className="flex items-center gap-2 text-sm font-semibold text-brand-muted"><Bike className="h-4 w-4 text-brand-teal-dark" /> Сумма доставки курьера</div><label className="flex items-center gap-2 self-start rounded-xl bg-brand-teal/10 px-3 py-2 sm:self-auto"><input type="number" min="0" value={deliveryAmount} onChange={(event) => setDeliveryAmount(event.target.value)} className="w-20 bg-transparent text-right text-sm font-bold text-brand-ink outline-none" /><span className="text-xs font-bold text-brand-teal-dark">сом.</span></label></div><div className="mt-4 rounded-2xl border border-brand-teal/25 bg-brand-teal/10 px-4 py-3 text-xs font-semibold text-brand-teal-dark">Доход с денег курьера: <strong>{formatSomoni(courierIncome)} сомони</strong>. Деньги партнёров ниже считаются транзитом.</div></section>
         <section className="rounded-[28px] border border-brand-line bg-white p-5 shadow-[0_18px_50px_rgba(23,35,44,0.045)] sm:p-7"><SectionLabel eyebrow="03 / транзит" title="Суммы партнёров" action={<button type="button" onClick={addPartnerRow} className="flex items-center gap-1.5 rounded-xl bg-brand-ink px-3 py-2 text-xs font-bold text-white transition-colors hover:bg-brand-teal hover:text-brand-ink"><Plus className="h-3.5 w-3.5" /> Добавить строку</button>} /><p className="mb-5 max-w-2xl text-xs font-medium leading-5 text-brand-muted">Вводите полную сумму чека, которую передал курьер. Комиссия считается доходом компании, остаток автоматически становится долгом партнёру.</p><div className="space-y-3">{partnerRows.map((row) => { const selectedPartner = partners.find((partner) => partner.id === row.partnerId) ?? partners[0]; const gross = parseAmount(row.amount); const commission = gross * ((selectedPartner?.rate ?? 0) / 100); return <div key={row.id} className="relative grid gap-3 rounded-2xl border border-brand-line bg-brand-mist/35 p-3 sm:grid-cols-[minmax(0,1fr)_126px_30px] sm:items-center sm:border-0 sm:bg-transparent sm:p-0"><label className="relative flex min-w-0 items-center gap-3 rounded-xl border border-brand-line bg-white px-3 py-2.5 sm:bg-brand-mist/45"><span className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg text-[10px] font-bold ${selectedPartner?.tone ?? toneOptions[0]}`}>{selectedPartner?.name.slice(0, 2).toUpperCase() ?? "--"}</span><select value={row.partnerId} onChange={(event) => updatePartnerRow(row.id, "partnerId", event.target.value)} className="min-w-0 flex-1 appearance-none bg-transparent pr-5 text-sm font-bold text-brand-ink outline-none">{partners.map((partner) => <option key={partner.id} value={partner.id}>{partner.name} · {partner.rate}%</option>)}</select><ChevronDown className="pointer-events-none absolute right-3 h-4 w-4 text-brand-muted" /></label><label className="flex items-center rounded-xl border border-brand-line bg-white px-3 py-2.5 sm:bg-brand-mist/45"><input type="number" min="0" value={row.amount} onChange={(event) => updatePartnerRow(row.id, "amount", event.target.value)} placeholder="0" className="w-full bg-transparent text-sm font-bold outline-none" /><span className="text-xs font-semibold text-brand-muted">сом.</span></label><button type="button" onClick={() => removePartnerRow(row.id)} className="absolute right-5 top-5 grid h-8 w-8 place-items-center rounded-lg text-brand-muted transition hover:bg-brand-coral/15 hover:text-brand-coral-dark sm:static sm:h-8 sm:w-8" aria-label="Удалить строку"><Minus className="h-4 w-4" /></button><div className="flex items-center justify-between px-1 text-[11px] font-semibold text-brand-muted sm:hidden"><span>Комиссия {selectedPartner?.rate ?? 0}% · +{formatSomoni(commission)} доход</span><span className="text-brand-teal-dark">долг {formatSomoni(gross - commission)}</span></div></div>; })}</div><div className="mt-5 grid gap-3 border-t border-brand-line pt-4 text-sm sm:grid-cols-3"><div><p className="text-xs font-semibold text-brand-muted">Получено чеков</p><p className="mt-1 font-display font-bold">{formatSomoni(partnerGross)} <span className="font-sans text-xs text-brand-muted">сом.</span></p></div><div><p className="text-xs font-semibold text-brand-muted">Доход компании</p><p className="mt-1 font-display font-bold text-brand-teal-dark">+{formatSomoni(partnerCommission)} <span className="font-sans text-xs text-brand-muted">сом.</span></p></div><div><p className="text-xs font-semibold text-brand-muted">Долг партнёрам</p><p className="mt-1 font-display font-bold">{formatSomoni(partnerGross - partnerCommission)} <span className="font-sans text-xs text-brand-muted">сом.</span></p></div></div></section>
         <section className="rounded-[28px] border border-brand-line bg-white p-5 shadow-[0_18px_50px_rgba(23,35,44,0.045)] sm:p-7"><SectionLabel eyebrow="04 / дополнительно" title="Батарейки и штрафы" action={<span className="text-xs font-semibold text-brand-muted">Батарейка — 5 сомони</span>} /><div className="grid gap-4 md:grid-cols-2"><label className="flex items-center gap-3 rounded-2xl border border-brand-line bg-brand-mist/45 p-4 focus-within:border-brand-teal"><span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-brand-yellow/25 text-[#a46b18]"><BatteryCharging className="h-5 w-5" /></span><span className="min-w-0 flex-1"><span className="block text-sm font-bold">Батарейки</span><span className="mt-1 block text-xs font-semibold text-brand-muted">{formatSomoni(batteryTotal)} сомони к оплате</span></span><input type="number" min="0" value={batteryCount} onChange={(event) => setBatteryCount(event.target.value)} className="w-14 rounded-lg bg-white px-2 py-2 text-center text-sm font-bold outline-none ring-1 ring-brand-line focus:ring-brand-teal" /><span className="text-xs font-bold text-brand-muted">шт.</span></label><label className="flex items-center gap-3 rounded-2xl border border-brand-line bg-brand-mist/45 p-4 focus-within:border-brand-teal"><span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-brand-coral/20 text-brand-coral-dark"><AlertTriangle className="h-5 w-5" /></span><span className="min-w-0 flex-1"><span className="block text-sm font-bold">Штрафы</span><span className="mt-1 block text-xs font-semibold text-brand-muted">Удержание со смены</span></span><input type="number" min="0" value={finesAmount} onChange={(event) => setFinesAmount(event.target.value)} className="w-[92px] rounded-lg bg-white px-2 py-2 text-right text-sm font-bold outline-none ring-1 ring-brand-line focus:ring-brand-teal" /><span className="text-xs font-bold text-brand-muted">сом.</span></label></div><label className="mt-4 block rounded-2xl border border-brand-line bg-brand-mist/35 p-4 focus-within:border-brand-teal focus-within:bg-white"><span className="mb-2 flex items-center gap-2 text-xs font-bold text-brand-muted"><MessageSquareText className="h-4 w-4 text-brand-teal-dark" /> Комментарий к смене</span><textarea value={comment} onChange={(event) => setComment(event.target.value)} placeholder="Например: возврат заказа, недостача, особые условия..." rows={4} className="min-h-[112px] w-full resize-y bg-transparent text-sm font-medium leading-6 outline-none placeholder:text-brand-muted/60" /></label></section>
-        <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between"><p className="flex items-center gap-2 text-xs font-semibold text-brand-muted"><span className="grid h-5 w-5 place-items-center rounded-full bg-brand-teal/15 text-brand-teal-dark"><Check className="h-3 w-3" /></span> Партнёрские деньги не входят в доход компании</p><button type="button" onClick={handleSave} className="flex h-12 items-center justify-center gap-2 rounded-2xl bg-brand-teal px-6 text-sm font-extrabold text-brand-ink shadow-[0_10px_24px_rgba(79,150,221,0.28)] transition hover:-translate-y-0.5 hover:bg-[#a9d5fa] active:translate-y-0">{isSaved ? <><Check className="h-4 w-4" /> Смена сохранена</> : <><Banknote className="h-4 w-4" /> Сохранить отчёт</>}</button></div>
+        <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between"><p className="flex items-center gap-2 text-xs font-semibold text-brand-muted"><span className="grid h-5 w-5 place-items-center rounded-full bg-brand-teal/15 text-brand-teal-dark"><Check className="h-3 w-3" /></span> Партнёрские деньги не входят в доход компании</p><button type="button" onClick={handleSave} disabled={isSaving} className="flex h-12 items-center justify-center gap-2 rounded-2xl bg-brand-teal px-6 text-sm font-extrabold text-brand-ink shadow-[0_10px_24px_rgba(79,150,221,0.28)] transition hover:-translate-y-0.5 hover:bg-[#a9d5fa] active:translate-y-0">{isSaving ? <><Loader2 className="h-4 w-4 animate-spin" /> Сохраняем...</> : isSaved ? <><Check className="h-4 w-4" /> Смена сохранена</> : <><Banknote className="h-4 w-4" /> Сохранить отчёт</>}</button></div>
       </div>
     </>
   );
@@ -460,10 +624,10 @@ export default function Index() {
         <nav className="mt-3 space-y-1">{navItems.map(({ id, label, icon: Icon, badge }) => { const isActive = activeNav === id; return <button key={id} type="button" onClick={() => navigate(id)} className={`flex w-full items-center justify-between rounded-2xl px-3 py-3 text-left text-sm font-semibold transition-colors ${isActive ? "bg-brand-teal text-brand-ink shadow-[0_8px_22px_rgba(79,150,221,0.14)]" : "text-white/60 hover:bg-white/8 hover:text-white"}`}><span className="flex items-center gap-3"><Icon className="h-[18px] w-[18px]" strokeWidth={isActive ? 2.4 : 1.9} />{label}</span>{badge && <span className={`grid h-5 min-w-5 place-items-center rounded-full px-1.5 text-[10px] font-bold ${isActive ? "bg-brand-ink text-white" : "bg-brand-coral text-brand-ink"}`}>{badge}</span>}</button>; })}</nav>
         <div className="mt-2 border-t border-white/10 pt-3"><button type="button" onClick={() => navigate("settings")} className={`flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left text-sm font-semibold transition-colors ${activeNav === "settings" ? "bg-white/10 text-white" : "text-white/45 hover:bg-white/8 hover:text-white"}`}><Settings2 className="h-[18px] w-[18px]" /> Настройки</button></div>
         <div className="mt-auto rounded-[22px] border border-white/10 bg-white/5 p-4"><div className="mb-4 flex items-center justify-between"><span className="grid h-8 w-8 place-items-center rounded-xl bg-brand-yellow/15 text-brand-yellow"><Sparkles className="h-4 w-4" /></span><span className="rounded-full bg-brand-teal/15 px-2 py-1 text-[10px] font-bold text-brand-teal">PRO</span></div><p className="text-sm font-semibold">Всё под контролем</p><p className="mt-1 text-xs leading-5 text-white/45">Доходы, расходы и долги партнёров в одном месте.</p></div>
-        <div className="mt-5 flex items-center gap-3 border-t border-white/10 px-2 pt-5"><div className="grid h-9 w-9 place-items-center rounded-full bg-brand-coral text-xs font-bold text-brand-ink">МК</div><div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold">Команда Fincance GoGo</p><p className="text-xs text-white/40">Финансовый отдел</p></div><Settings2 className="h-4 w-4 text-white/35" /></div>
+        <div className="mt-5 flex items-center gap-3 border-t border-white/10 px-2 pt-5"><div className="grid h-9 w-9 place-items-center rounded-full bg-brand-coral text-xs font-bold text-brand-ink">МК</div><div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold">Команда Fincance GoGo</p><p className="text-xs text-white/40">Финансовый отдел</p></div><button type="button" onClick={() => signOut(auth)} className="text-white/35 transition hover:text-white" aria-label="Выйти из аккаунта" title="Выйти из аккаунта"><Settings2 className="h-4 w-4" /></button></div>
       </aside>
       <div className="min-w-0 flex-1 lg:pl-[248px]"><header className="flex items-center justify-between border-b border-brand-line/80 bg-white/75 px-4 py-4 backdrop-blur-sm sm:px-6 lg:hidden"><div className="flex items-center gap-2.5"><div className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-xl bg-white ring-1 ring-brand-teal/30"><img src="https://cdn.builder.io/api/v1/image/assets%2F8cc0bb9fe0d443f9a8b7366b133cf86b%2F88b7771880134a35ac741b87bf71c183?format=webp&width=800&height=1200" alt="Логотип Fincance GoGo" className="h-full w-full object-contain" /></div><div><p className="font-display text-base font-bold leading-none">Fincance GoGo</p><p className="mt-1 text-[9px] font-bold uppercase tracking-[0.18em] text-brand-muted">учёт и расчёты</p></div></div><div className="flex items-center gap-2"><button type="button" className="grid h-9 w-9 place-items-center rounded-xl border border-brand-line text-brand-muted" aria-label="Уведомления"><Bell className="h-4 w-4" /></button><button type="button" onClick={() => navigate("settings")} className="grid h-9 w-9 place-items-center rounded-xl bg-brand-ink text-white" aria-label="Настройки"><Menu className="h-4 w-4" /></button></div></header>
-        <main className="mx-auto max-w-[1440px] px-4 pb-28 pt-7 sm:px-6 lg:px-10 lg:pb-12 lg:pt-10">{notice && <div className="mb-5 flex items-center gap-3 rounded-2xl border border-brand-yellow/40 bg-brand-yellow/15 px-4 py-3 text-sm font-semibold text-[#805817]"><CircleHelp className="h-4 w-4 shrink-0" />{notice}</div>}<SummaryCards companyIncome={companyIncome} partnerOutstanding={partnerOutstanding} cashBalance={cashBalance} expenseTotal={expenseTotal} />{viewContent}</main>
+        <main className="mx-auto max-w-[1440px] px-4 pb-28 pt-7 sm:px-6 lg:px-10 lg:pb-12 lg:pt-10">{firebaseError && <div className="mb-5 flex items-center gap-3 rounded-2xl border border-brand-coral/30 bg-brand-coral/10 px-4 py-3 text-sm font-semibold text-brand-coral-dark"><CircleHelp className="h-4 w-4 shrink-0" />{firebaseError}. Проверьте правила Firestore и подключение Firebase.</div>}{notice && <div className="mb-5 flex items-center gap-3 rounded-2xl border border-brand-yellow/40 bg-brand-yellow/15 px-4 py-3 text-sm font-semibold text-[#805817]"><CircleHelp className="h-4 w-4 shrink-0" />{notice}</div>}<SummaryCards companyIncome={companyIncome} partnerOutstanding={partnerOutstanding} cashBalance={cashBalance} expenseTotal={expenseTotal} />{viewContent}</main>
         <nav className="fixed inset-x-3 bottom-3 z-30 flex items-center justify-around rounded-2xl border border-brand-line bg-white/95 p-2 shadow-[0_12px_36px_rgba(23,35,44,0.15)] backdrop-blur-md lg:hidden">{navItems.slice(0, 4).map(({ id, label, icon: Icon }) => { const isActive = activeNav === id; return <button key={id} type="button" onClick={() => navigate(id)} className={`flex min-w-0 flex-col items-center gap-1 rounded-xl px-2.5 py-2 text-[10px] font-bold ${isActive ? "bg-brand-teal/20 text-brand-teal-dark" : "text-brand-muted"}`}><Icon className="h-4 w-4" /><span className="max-w-[66px] truncate">{label}</span></button>; })}<button type="button" onClick={() => navigate("settings")} className={`flex min-w-0 flex-col items-center gap-1 rounded-xl px-2.5 py-2 text-[10px] font-bold ${activeNav === "settings" ? "bg-brand-teal/20 text-brand-teal-dark" : "text-brand-muted"}`}><Settings2 className="h-4 w-4" /><span>Настройки</span></button></nav>
       </div>
     </div>
