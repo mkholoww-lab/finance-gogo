@@ -6,51 +6,51 @@
 
 @layer base {
   :root {
-    --background: 42 33% 97%;
-    --foreground: 204 28% 14%;
+    --background: 214 65% 95%;
+    --foreground: 214 46% 14%;
 
     --card: 0 0% 100%;
-    --card-foreground: 204 28% 14%;
+    --card-foreground: 214 46% 14%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 204 28% 14%;
+    --popover-foreground: 214 46% 14%;
 
-    --primary: 204 28% 14%;
+    --primary: 214 46% 14%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 42 33% 94%;
-    --secondary-foreground: 204 28% 14%;
+    --secondary: 214 52% 92%;
+    --secondary-foreground: 214 46% 14%;
 
-    --muted: 42 20% 92%;
+    --muted: 214 34% 90%;
     --muted-foreground: 204 10% 48%;
 
-    --accent: 164 55% 83%;
-    --accent-foreground: 204 28% 14%;
+    --accent: 213 70% 87%;
+    --accent-foreground: 214 46% 14%;
 
     --destructive: 8 74% 64%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 40 21% 88%;
-    --input: 40 21% 88%;
-    --ring: 164 55% 67%;
+    --border: 214 28% 84%;
+    --input: 214 28% 84%;
+    --ring: 213 70% 54%;
 
     --radius: 0.75rem;
 
-    --sidebar-background: 204 28% 14%;
+    --sidebar-background: 211 72% 20%;
     --sidebar-foreground: 0 0% 100%;
-    --sidebar-primary: 164 55% 67%;
-    --sidebar-primary-foreground: 204 28% 14%;
-    --sidebar-accent: 204 22% 20%;
+    --sidebar-primary: 213 70% 54%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 211 61% 27%;
     --sidebar-accent-foreground: 0 0% 100%;
-    --sidebar-border: 204 18% 25%;
-    --sidebar-ring: 164 55% 67%;
+    --sidebar-border: 211 45% 32%;
+    --sidebar-ring: 213 70% 54%;
 
-    --brand-ink: 204 28% 14%;
-    --brand-mist: 42 33% 97%;
-    --brand-line: 40 21% 88%;
-    --brand-muted: 204 10% 48%;
-    --brand-teal: 164 55% 67%;
-    --brand-teal-dark: 165 49% 34%;
+    --brand-ink: 211 72% 20%;
+    --brand-mist: 214 65% 95%;
+    --brand-line: 214 28% 84%;
+    --brand-muted: 214 18% 47%;
+    --brand-teal: 213 70% 54%;
+    --brand-teal-dark: 214 73% 32%;
     --brand-yellow: 43 93% 73%;
     --brand-coral: 8 74% 64%;
     --brand-coral-dark: 8 59% 44%;
