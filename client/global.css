@@ -6,7 +6,7 @@
 
 @layer base {
   :root {
-    --background: 214 65% 95%;
+    --background: 214 68% 91%;
     --foreground: 214 46% 14%;
 
     --card: 0 0% 100%;
@@ -32,25 +32,25 @@
 
     --border: 214 28% 84%;
     --input: 214 28% 84%;
-    --ring: 213 70% 54%;
+    --ring: 210 75% 57%;
 
     --radius: 0.75rem;
 
     --sidebar-background: 211 72% 20%;
     --sidebar-foreground: 0 0% 100%;
-    --sidebar-primary: 213 70% 54%;
+    --sidebar-primary: 210 75% 57%;
     --sidebar-primary-foreground: 0 0% 100%;
     --sidebar-accent: 211 61% 27%;
     --sidebar-accent-foreground: 0 0% 100%;
     --sidebar-border: 211 45% 32%;
-    --sidebar-ring: 213 70% 54%;
+    --sidebar-ring: 210 75% 57%;
 
     --brand-ink: 211 72% 20%;
-    --brand-mist: 214 65% 95%;
+    --brand-mist: 214 68% 91%;
     --brand-line: 214 28% 84%;
     --brand-muted: 214 18% 47%;
-    --brand-teal: 213 70% 54%;
-    --brand-teal-dark: 214 73% 32%;
+    --brand-teal: 210 75% 57%;
+    --brand-teal-dark: 212 78% 36%;
     --brand-yellow: 43 93% 73%;
     --brand-coral: 8 74% 64%;
     --brand-coral-dark: 8 59% 44%;
