@@ -57,6 +57,21 @@ export default {
           border: "hsl(var(--sidebar-border))",
           ring: "hsl(var(--sidebar-ring))",
         },
+        brand: {
+          ink: "hsl(var(--brand-ink))",
+          mist: "hsl(var(--brand-mist))",
+          line: "hsl(var(--brand-line))",
+          muted: "hsl(var(--brand-muted))",
+          teal: "hsl(var(--brand-teal))",
+          "teal-dark": "hsl(var(--brand-teal-dark))",
+          yellow: "hsl(var(--brand-yellow))",
+          coral: "hsl(var(--brand-coral))",
+          "coral-dark": "hsl(var(--brand-coral-dark))",
+          green: "hsl(var(--brand-green))",
+        },
+      },
+      fontFamily: {
+        display: ["Space Grotesk", "DM Sans", "sans-serif"],
       },
       borderRadius: {
         lg: "var(--radius)",
